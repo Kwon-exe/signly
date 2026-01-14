@@ -16,7 +16,7 @@ function ImageComponent({ show }) {
 
   useEffect(() => {
     if (show) {
-      fetch("http://127.0.0.1:5000/hint")
+      fetch("https://signly-backend-2rlk.onrender.com//hint")
         .then(response => response.json())
         .then(data => {
           setUrl(hints[data.data]);  // Update the URL state with the correct hint
