@@ -64,9 +64,9 @@ CORS(app, resources={
     r"/*": {
         "origins": [
             "http://localhost:3000",
-            "http://localhost:5173",  # Vite dev server
-            "https://*.vercel.app",   # All Vercel deployments
-            "https://your-app.vercel.app"  # Your production URL (update later)
+            "http://localhost:5173",
+            "https://signly-iota.vercel.app/",      # ← Add your actual URL
+            "https://*.vercel.app"             # ← Allows all Vercel preview deployments
         ]
     }
 })
@@ -74,8 +74,8 @@ CORS(app, resources={
 socketio = SocketIO(app, cors_allowed_origins=[
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://*.vercel.app",
-    "https://your-app.vercel.app"
+    "https://signly-iota.vercel.app/",              # ← Add your actual URL
+    "https://*.vercel.app"
 ])
 
 output=np.zeros((20,126))
