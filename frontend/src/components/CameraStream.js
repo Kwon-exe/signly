@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import io from 'socket.io-client';  // Import the Socket.IO client
+import io from 'socket.io-client';
 
 const CameraStream = () => {
   const videoRef = useRef(null);
@@ -8,6 +8,11 @@ const CameraStream = () => {
   const [word, setWord] = useState([]);
   const [answers, setAnswers] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Get backend URL from environment variable
+  const BACKEND_URL = 'https://signly-backend-2rlk.onrender.com/';
+  // const BACKEND_URL = 'http://127.0.0.1:5000/';
+
 
   useEffect(() => {
     const startVideo = async () => {
@@ -23,35 +28,43 @@ const CameraStream = () => {
 
     startVideo();
 
-    const socket = io("127.0.0.1:5000/", {
-        transports: ["websocket"],
-        cors: {
-          origin: "http://localhost:3000/",
-        },
-    });
-    socket.on('connect', () => {
-      console.log('Socket.IO connection established');
-      setSocket(socket);
+    // Connect to backend using environment variable
+    const newSocket = io(BACKEND_URL, {
+      transports: ["websocket", "polling"], // Add polling as fallback
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000
     });
 
-    socket.on('receive_word', (data) => {
-        //console.log("word was received", data.message);
-        //console.log("answers were received", data.answers)
-        setWord(data.message)
-        setAnswers(data.answers)
-    })
+    newSocket.on('connect', () => {
+      console.log('✅ Connected to backend:', BACKEND_URL);
+      setSocket(newSocket);
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('❌ Connection error:', error.message);
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('⚠️ Disconnected:', reason);
+    });
+
+    newSocket.on('receive_word', (data) => {
+      setWord(data.message);
+      setAnswers(data.answers);
+    });
 
     return () => {
-      if (socket) {
-        socket.disconnect();
+      if (newSocket) {
+        newSocket.disconnect();
       }
     };
-  }, []);
+  }, []); // Empty dependency array
 
   useEffect(() => {
     const interval = setInterval(() => {
       captureFrame();
-    }, 75); // 100ms interval
+    }, 75);
 
     return () => clearInterval(interval);
   }, [socket]);
@@ -62,31 +75,25 @@ const CameraStream = () => {
     const context = canvas.getContext('2d');
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Convert frame to base64 string
     const frameData = canvas.toDataURL('image/jpeg');
 
-    // Send frame via Socket.IO
     if (socket) {
       socket.emit('send_frame', { frame: frameData });
     }
-    
   };
 
   const skipWord = () => {
     const newAnswers = [...answers];
 
-    // Only mark the word as 'skipped' if it's not already 'correct'
     if (newAnswers[currentIndex] !== 'correct') {
-        newAnswers[currentIndex] = 'skipped';
+      newAnswers[currentIndex] = 'skipped';
     }
     setAnswers(newAnswers);
 
-    // Send the updated sentence and answers back to the server
     if (socket) {
       socket.emit('skip_word', { message: word, answers: newAnswers });
     }
 
-    // Move to the next word
     setCurrentIndex((prevIndex) => (prevIndex + 1) % word.length);
   };
 
@@ -105,13 +112,13 @@ const CameraStream = () => {
                 >
                   <a 
                     target="_blank" 
+                    rel="noreferrer"
                     href={`https://www.signingsavvy.com/sign/${wordItem.toUpperCase()}/2700/1`} 
                     className="text-reset text-decoration-none"
                   >
                     {wordItem}{" "}
                   </a>
                 </span>
-                
               </div>
             ))}
             <button onClick={() => skipWord()}>Skip</button>
@@ -120,7 +127,7 @@ const CameraStream = () => {
       </div>
       <div>
         <video ref={videoRef} autoPlay playsInline width="450" height="450" style={{
-            opacity: '0%',
+          opacity: '0%',
           position: 'absolute',
           top: '500px', 
           left: '800px',

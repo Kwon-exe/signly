@@ -21,6 +21,14 @@ from mediapipe.tasks.python import vision
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import InputLayer, Conv1D, MaxPooling1D, Flatten, Dense, Conv2D, MaxPooling2D
 
+# ---- Render-safe globals ----
+output = np.zeros((20, 126), dtype=np.float32)
+indexVector = np.arange(20, dtype=np.float32)
+
+model_input = np.zeros((1, 20, 127, 1), dtype=np.float32)
+
+frame_idx = 0
+last_emit_time = 0.0
 
 
 model = tf.keras.Sequential([
@@ -50,7 +58,7 @@ base_options = python.BaseOptions(
 options = vision.HandLandmarkerOptions(
     base_options=base_options,
     num_hands=2,
-    running_mode=vision.RunningMode.IMAGE
+    running_mode=vision.RunningMode.VIDEO
 )
 
 hand_landmarker = vision.HandLandmarker.create_from_options(options)
@@ -131,24 +139,36 @@ def handle_skip(data):
 
 @socketio.on('send_frame')
 def handle_frame(data):
-    global output, indexVector, sentence, answers, current_word, current_idx
+    global output, frame_idx, model_input
+    global sentence, answers, current_word, current_idx, last_emit_time
 
     try:
-        # Decode frame
+        # -------- Frame skipping (Render CPU safety) --------
+        frame_idx += 1
+        if frame_idx % 2 != 0:
+            return
+
+        # -------- Decode base64 → NumPy (NO PIL) --------
         img_data = base64.b64decode(data['frame'].split(',')[1])
-        img = np.array(Image.open(BytesIO(img_data)))
-        frame = cv.cvtColor(img, cv.COLOR_RGB2BGR)
+        np_arr = np.frombuffer(img_data, np.uint8)
+        frame = cv.imdecode(np_arr, cv.IMREAD_COLOR)
+        if frame is None:
+            return
+
         rgb_frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
 
-        # MediaPipe Image
+        # -------- MediaPipe Image --------
         mp_image = mp.Image(
             image_format=mp.ImageFormat.SRGB,
             data=rgb_frame
         )
 
-        result = hand_landmarker.detect(mp_image)
+        # -------- MediaPipe VIDEO mode --------
+        timestamp_ms = int(time.time() * 1000)
+        result = hand_landmarker.detect_for_video(mp_image, timestamp_ms)
 
-        landmark_coords = [0.0] * 126
+        # -------- Landmark buffer (float32) --------
+        landmark_coords = np.zeros(126, dtype=np.float32)
 
         if result.hand_landmarks:
             for h_idx, landmarks in enumerate(result.hand_landmarks):
@@ -162,47 +182,50 @@ def handle_frame(data):
                     landmark_coords[i + 2] = lm.z
                     i += 3
 
-            # Sliding window
-            output = output[1:, :]
-            output = np.vstack([output, np.array(landmark_coords)])
+        # -------- Rolling window (NO vstack) --------
+        output[frame_idx % 20] = landmark_coords
 
-            # Add index column
-            model_input = np.column_stack((indexVector, output))
-            model_input = model_input.reshape(1, 20, 127, 1)
+        # -------- Pre-allocated model input --------
+        model_input[0, :, 0, 0] = indexVector
+        model_input[0, :, 1:, 0] = output
 
-            predictions = model.predict(model_input, verbose=0)
-            predicted_word = asl_keys[np.argmax(predictions)]
+        # -------- Inference --------
+        predictions = model.predict(model_input, verbose=0)
+        pred_idx = int(np.argmax(predictions))
+        confidence = float(predictions[0][pred_idx])
+        predicted_word = asl_keys[pred_idx]
 
-            print(f"PREDICTION: {predicted_word} ({np.max(predictions):.3f})")
+        print(f"PREDICTION: {predicted_word} ({confidence:.3f})")
 
-            if predicted_word == current_word:
-                # Mark current index as correct and pause briefly
-                answers[current_idx] = 'correct'
-                time.sleep(0.75)
+        # -------- Confidence gate (important on Render) --------
+        if confidence > 0.85 and predicted_word == current_word:
+            answers[current_idx] = 'correct'
 
-                # If all words are now correct, choose a new sentence
+            # Throttle emits (network + memory safety)
+            now = time.time()
+            if now - last_emit_time > 0.5:
+                last_emit_time = now
+
+                # Advance word
                 if answers.count('correct') == len(sentence):
                     sentence = random.sample(word_list, 3)
-                    current_idx = 0
-                    current_word = sentence[0]
                     answers = ['incorrect'] * len(sentence)
+                    current_idx = 0
                 else:
-                    # Advance to the next index that hasn't been completed
-                    next_idx = (current_idx + 1) % len(sentence)
-                    while answers[next_idx] == 'correct':
-                        next_idx = (next_idx + 1) % len(sentence)
-                    current_idx = next_idx
-                    current_word = sentence[current_idx]
+                    while True:
+                        current_idx = (current_idx + 1) % len(sentence)
+                        if answers[current_idx] != 'correct':
+                            break
 
-            socketio.emit('receive_word', {
-                'message': sentence,
-                'answers': answers
-            })
+                current_word = sentence[current_idx]
 
+                socketio.emit('receive_word', {
+                    'message': sentence,
+                    'answers': answers
+                })
+                
     except Exception as e:
         print("FRAME ERROR:", e)
-        output = np.zeros((20, 126))
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
