@@ -74,7 +74,8 @@ CORS(app, resources={
             "http://localhost:3000",
             "http://localhost:5173",
             "https://signly-iota.vercel.app/",      # ← Add your actual URL
-            "https://*.vercel.app"             # ← Allows all Vercel preview deployments
+            "https://*.vercel.app",             # ← Allows all Vercel preview deployments
+            "http://18.224.214.141"             # ← Add AWS EC2 public IP
         ]
     }
 })
@@ -83,7 +84,8 @@ socketio = SocketIO(app, cors_allowed_origins=[
     "http://localhost:3000",
     "http://localhost:5173",
     "https://signly-iota.vercel.app/",              # ← Add your actual URL
-    "https://*.vercel.app"
+    "https://*.vercel.app",
+    "http://18.224.214.141"             # ← Add AWS EC2 public IP
 ])
 
 output=np.zeros((20,126))
