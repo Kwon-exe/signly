@@ -10,7 +10,7 @@ const CameraStream = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
 
   // Get backend URL from environment variable
-  const BACKEND_URL = 'https://signly-backend-2rlk.onrender.com/';
+  const BACKEND_URL = 'http://18.224.214.141:5000/'; // Updated to AWS EC2 public IP
   // const BACKEND_URL = 'http://127.0.0.1:5000/';
 
 
