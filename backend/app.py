@@ -136,15 +136,30 @@ def handle_skip(data):
 frame_counter = 0
 PREDICTION_INTERVAL = 2  # Process every 2nd frame
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+# Create a thread pool executor for handling frame processing tasks
+executor = ThreadPoolExecutor(max_workers=4)
+
+# Lock for thread safety
+lock = threading.Lock()
+
 @socketio.on('send_frame')
 def handle_frame(data):
-    global output, indexVector, sentence, answers, current_word, current_idx, frame_counter
+    global frame_counter
+
+    frame_counter += 1
+    if frame_counter % PREDICTION_INTERVAL != 0:
+        return  # Skip this frame
+
+    # Submit the frame processing task to the thread pool
+    executor.submit(process_frame, data)
+
+def process_frame(data):
+    global output, indexVector, sentence, answers, current_word, current_idx
 
     try:
-        frame_counter += 1
-        if frame_counter % PREDICTION_INTERVAL != 0:
-            return  # Skip this frame
-
         # Decode frame
         img_data = base64.b64decode(data['frame'].split(',')[1])
         img = np.array(Image.open(BytesIO(img_data)))
@@ -174,35 +189,37 @@ def handle_frame(data):
                     i += 3
 
             # Sliding window
-            output = output[1:, :]
-            output = np.vstack([output, np.array(landmark_coords).reshape(1, -1)])
+            with lock:
+                output = output[1:, :]
+                output = np.vstack([output, np.array(landmark_coords).reshape(1, -1)])
 
-            # Add index column
-            model_input = np.column_stack((indexVector, output))
-            model_input = model_input.reshape(1, 20, 127, 1)
+                # Add index column
+                model_input = np.column_stack((indexVector, output))
+                model_input = model_input.reshape(1, 20, 127, 1)
 
             predictions = model.predict(model_input, verbose=0)
             predicted_word = asl_keys[np.argmax(predictions)]
 
             print(f"PREDICTION: {predicted_word} ({np.max(predictions):.3f})")
 
-            if predicted_word == current_word:
-                # Mark current index as correct and pause briefly
-                answers[current_idx] = 'correct'
+            with lock:
+                if predicted_word == current_word:
+                    # Mark current index as correct and pause briefly
+                    answers[current_idx] = 'correct'
 
-                # If all words are now correct, choose a new sentence
-                if answers.count('correct') == len(sentence):
-                    sentence = random.sample(word_list, 3)
-                    current_idx = 0
-                    current_word = sentence[0]
-                    answers = ['incorrect'] * len(sentence)
-                else:
-                    # Advance to the next index that hasn't been completed
-                    next_idx = (current_idx + 1) % len(sentence)
-                    while answers[next_idx] == 'correct':
-                        next_idx = (next_idx + 1) % len(sentence)
-                    current_idx = next_idx
-                    current_word = sentence[current_idx]
+                    # If all words are now correct, choose a new sentence
+                    if answers.count('correct') == len(sentence):
+                        sentence = random.sample(word_list, 3)
+                        current_idx = 0
+                        current_word = sentence[0]
+                        answers = ['incorrect'] * len(sentence)
+                    else:
+                        # Advance to the next index that hasn't been completed
+                        next_idx = (current_idx + 1) % len(sentence)
+                        while answers[next_idx] == 'correct':
+                            next_idx = (next_idx + 1) % len(sentence)
+                        current_idx = next_idx
+                        current_word = sentence[current_idx]
 
             socketio.emit('receive_word', {
                 'message': sentence,
@@ -211,7 +228,8 @@ def handle_frame(data):
 
     except Exception as e:
         print("FRAME ERROR:", e)
-        output = np.zeros((20, 126))
+        with lock:
+            output = np.zeros((20, 126))
 
 
 if __name__ == '__main__':
