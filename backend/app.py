@@ -132,11 +132,19 @@ def handle_skip(data):
     # Emit updated state back to clients
     socketio.emit('receive_word', {'message': sentence, 'answers': answers})
 
+# Add a frame counter to control prediction frequency
+frame_counter = 0
+PREDICTION_INTERVAL = 2  # Process every 2nd frame
+
 @socketio.on('send_frame')
 def handle_frame(data):
-    global output, indexVector, sentence, answers, current_word, current_idx
+    global output, indexVector, sentence, answers, current_word, current_idx, frame_counter
 
     try:
+        frame_counter += 1
+        if frame_counter % PREDICTION_INTERVAL != 0:
+            return  # Skip this frame
+
         # Decode frame
         img_data = base64.b64decode(data['frame'].split(',')[1])
         img = np.array(Image.open(BytesIO(img_data)))
@@ -167,7 +175,7 @@ def handle_frame(data):
 
             # Sliding window
             output = output[1:, :]
-            output = np.vstack([output, np.array(landmark_coords)])
+            output = np.vstack([output, np.array(landmark_coords).reshape(1, -1)])
 
             # Add index column
             model_input = np.column_stack((indexVector, output))
@@ -181,7 +189,6 @@ def handle_frame(data):
             if predicted_word == current_word:
                 # Mark current index as correct and pause briefly
                 answers[current_idx] = 'correct'
-                time.sleep(0.75)
 
                 # If all words are now correct, choose a new sentence
                 if answers.count('correct') == len(sentence):

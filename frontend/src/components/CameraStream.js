@@ -62,19 +62,29 @@ const CameraStream = () => {
   }, []); // Empty dependency array
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      captureFrame();
+    const renderInterval = setInterval(() => {
+      renderFrame();
+    }, 10);
+
+    const sendInterval = setInterval(() => {
+      sendFrame();
     }, 75);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(renderInterval);
+      clearInterval(sendInterval);
+    };
   }, [socket]);
 
-  const captureFrame = () => {
+  const renderFrame = () => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
     const context = canvas.getContext('2d');
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  };
 
+  const sendFrame = () => {
+    const canvas = canvasRef.current;
     const frameData = canvas.toDataURL('image/jpeg');
 
     if (socket) {
