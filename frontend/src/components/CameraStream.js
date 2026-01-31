@@ -9,9 +9,13 @@ const CameraStream = () => {
   const [answers, setAnswers] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Get backend URL from environment variable
-  const BACKEND_URL = 'http://18.224.214.141:5000/'; // Updated to AWS EC2 public IP
-  // const BACKEND_URL = 'http://127.0.0.1:5000/';
+  // Backend URL: use REACT_APP_BACKEND_URL in production (must be HTTPS when frontend is on HTTPS).
+  // For local dev, defaults to localhost. When frontend is on HTTPS (e.g. Vercel), backend must use HTTPS so Socket.io uses wss://.
+  const BACKEND_URL =
+    process.env.REACT_APP_BACKEND_URL ||
+    (typeof window !== 'undefined' && window.location.protocol === 'https:'
+      ? 'https://18.224.214.141:5000/'
+      : 'http://18.224.214.141:5000/');
 
 
   useEffect(() => {
